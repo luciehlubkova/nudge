@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  /* Nudge – Warm Earthy palette */
+  --color-cream: #F7E6CA;
+  --color-sand: #E8D59E;
+  --color-peach: #FFD3AC;
+  --color-ivory: #F5F5DC;
+  --color-warm-gray: #CCBEB1;
+  --color-gray: #898989;
+  --color-mauve: #D9BBB0;
+  --color-taupe: #AD9C8E;
+  --color-brown: #6F4E37;
+  --color-dark-brown: #664C36;
+  --color-very-dark: #331C08;
+  --color-orange: #D47E30;
+  --color-green: #4B6E48;
+  --color-olive: #B2AC88;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --background: #F7E6CA;
+  --foreground: #331C08;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+* {
+  box-sizing: border-box;
+}
