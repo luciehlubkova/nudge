@@ -16,9 +16,10 @@ API_KEY = os.getenv("BRIGHTDATA_API_KEY")
 DATASET_ID = os.getenv("BRIGHTDATA_DATASET_ID")
 
 # === NASTAVENÍ HLEDÁNÍ ===
-CHECKIN_TOTAL = date(2026, 8, 1)    # <-- zadej svůj datum příjezdu
-CHECKOUT_TOTAL = date(2026, 8, 11)  # <-- zadej svůj datum odjezdu
+CHECKIN_TOTAL = date(2026, 9, 10)
+CHECKOUT_TOTAL = date(2026, 9, 22)
 ADULTS = 2
+CHILDREN = [1]  # seznam věků dětí (v letech)
 ROOMS = 1
 
 # Destinace (části ostrova)
@@ -30,8 +31,10 @@ DESTINATIONS = [
 # Minimální hodnocení (0-10)
 MIN_RATING = 8.0
 
-# Maximální cena za noc v EUR (None = bez limitu)
-MAX_PRICE_PER_NIGHT = None
+# Budget: max 2800 Kč/noc — převedeno na EUR (kurz ~25 Kč/EUR)
+MAX_PRICE_PER_NIGHT_CZK = 2800
+CZK_TO_EUR = 25
+MAX_PRICE_PER_NIGHT = MAX_PRICE_PER_NIGHT_CZK / CZK_TO_EUR  # ~112 EUR
 
 # === BRIGHT DATA API ===
 BASE_URL = "https://api.brightdata.com/datasets/v3"
@@ -43,6 +46,7 @@ HEADERS = {
 
 def trigger_search(destination_query: str, checkin: date, checkout: date) -> str:
     """Spustí vyhledávání přes Bright Data API."""
+    children_params = "".join(f"&age={age}" for age in CHILDREN)
     payload = [
         {
             "url": (
@@ -51,6 +55,8 @@ def trigger_search(destination_query: str, checkin: date, checkout: date) -> str
                 f"&checkin={checkin.isoformat()}"
                 f"&checkout={checkout.isoformat()}"
                 f"&group_adults={ADULTS}"
+                f"&group_children={len(CHILDREN)}"
+                f"{children_params}"
                 f"&no_rooms={ROOMS}"
             )
         }
@@ -112,6 +118,7 @@ def filter_hotels(hotels: list, checkin: date, checkout: date) -> list:
             "rating": rating,
             "price_total": round(price_total, 2),
             "price_per_night": round(price_per_night, 2),
+            "price_per_night_czk": round(price_per_night * CZK_TO_EUR),
             "nights": nights,
             "checkin": checkin.isoformat(),
             "checkout": checkout.isoformat(),
@@ -160,21 +167,25 @@ def find_combinations(results_by_dest: dict, total_nights: int) -> list:
 
 def format_for_claude(results: dict, combos: list, total_nights: int) -> str:
     """Vytvoří přehledný text pro vložení do Claude chatu."""
+    children_info = f" + {len(CHILDREN)} dítě (věk: {', '.join(str(a) for a in CHILDREN)} r.)"
     lines = [
         "# Výsledky hledání ubytování na Sardinii",
-        f"Celkem nocí: {total_nights} | Termín: {CHECKIN_TOTAL} – {CHECKOUT_TOTAL}",
-        f"Osoby: {ADULTS} | Min. hodnocení: {MIN_RATING}",
+        f"Termín: {CHECKIN_TOTAL} – {CHECKOUT_TOTAL} ({total_nights} nocí)",
+        f"Osoby: {ADULTS} dospělí{children_info} | Min. hodnocení: {MIN_RATING}",
+        f"Max. cena/noc: {MAX_PRICE_PER_NIGHT_CZK} Kč (~{MAX_PRICE_PER_NIGHT:.0f} EUR, kurz {CZK_TO_EUR} Kč/EUR)",
         "",
     ]
 
     for dest, hotels in results.items():
         lines.append(f"## {dest} ({len(hotels)} ubytování splňuje kritéria)")
         for i, h in enumerate(hotels[:15], 1):
-            snidane = "✓ snídaně" if h["breakfast"] else ""
+            snidane = " | ✓ snídaně" if h["breakfast"] else ""
             lines.append(
                 f"{i}. **{h['name']}** | ⭐ {h['rating']} | "
-                f"{h['price_per_night']} EUR/noc | {snidane}"
+                f"{h['price_per_night_czk']} Kč/noc (~{h['price_per_night']} EUR){snidane}"
             )
+            if h["location"]:
+                lines.append(f"   📍 {h['location']}")
             if h["url"]:
                 lines.append(f"   {h['url']}")
         lines.append("")
@@ -183,19 +194,18 @@ def format_for_claude(results: dict, combos: list, total_nights: int) -> str:
         lines.append("## TOP kombinace dvou ubytování")
         for i, c in enumerate(combos[:10], 1):
             a, b = c["hotel_a"], c["hotel_b"]
+            total_czk = round(c["total_price_eur"] * CZK_TO_EUR)
             lines.append(
                 f"\n### Kombinace {i} – {c['split']} | "
-                f"Celkem ~{c['total_price_eur']} EUR | ⭐ avg {c['avg_rating']}"
+                f"Celkem ~{total_czk} Kč (~{c['total_price_eur']} EUR) | ⭐ avg {c['avg_rating']}"
             )
             lines.append(
-                f"  1. {a['name']} ({a['nights_in_combo']} nocí, "
-                f"{a['checkin']}–{a['checkout']}, ⭐{a['rating']}, "
-                f"{a['price_per_night']} EUR/noc)"
+                f"  1. {a['name']} ({a['nights_in_combo']} nocí | ⭐{a['rating']} | "
+                f"{a['price_per_night_czk']} Kč/noc)"
             )
             lines.append(
-                f"  2. {b['name']} ({b['nights_in_combo']} nocí, "
-                f"{b['checkin']}–{b['checkout']}, ⭐{b['rating']}, "
-                f"{b['price_per_night']} EUR/noc)"
+                f"  2. {b['name']} ({b['nights_in_combo']} nocí | ⭐{b['rating']} | "
+                f"{b['price_per_night_czk']} Kč/noc)"
             )
 
     return "\n".join(lines)
@@ -211,6 +221,7 @@ def main():
 
     total_nights = (CHECKOUT_TOTAL - CHECKIN_TOTAL).days
     print(f"Hledám ubytování na Sardinii | {CHECKIN_TOTAL} – {CHECKOUT_TOTAL} ({total_nights} nocí)")
+    print(f"Osoby: {ADULTS} dospělí + {len(CHILDREN)} dítě | Max {MAX_PRICE_PER_NIGHT_CZK} Kč/noc")
     print()
 
     results_by_dest = {}
